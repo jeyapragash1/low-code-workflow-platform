@@ -4,7 +4,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-const axios = require('axios'); // Import axios for the backend
+const axios = require('axios');
 const authenticateToken = require('./authMiddleware');
 
 const app = express();
@@ -25,7 +25,7 @@ const pool = new Pool({
 });
 
 // =================================================================
-// === AUTHENTICATION ROUTES (Complete and Correct) ===
+// === AUTHENTICATION ROUTES ===
 // =================================================================
 
 app.post('/api/auth/register', async (req, res) => {
@@ -69,9 +69,10 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // =================================================================
-// === WORKFLOW MANAGEMENT ROUTES (Complete and Correct) ===
+// === WORKFLOW MANAGEMENT AND EXECUTION ROUTES ===
 // =================================================================
 
+// GET all workflows for the logged-in user
 app.get('/api/workflows', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM workflows WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
@@ -82,6 +83,7 @@ app.get('/api/workflows', authenticateToken, async (req, res) => {
   }
 });
 
+// POST a new workflow for the logged-in user
 app.post('/api/workflows', authenticateToken, async (req, res) => {
   try {
     const { name, definition } = req.body;
@@ -98,9 +100,32 @@ app.post('/api/workflows', authenticateToken, async (req, res) => {
   }
 });
 
-// =================================================================
-// === UPGRADED WORKFLOW EXECUTION ENGINE (Complete and Correct) ===
-// =================================================================
+// --- NEW ENDPOINT ---
+// GET execution history for a specific workflow
+app.get('/api/workflows/:workflowId/executions', authenticateToken, async (req, res) => {
+  const { workflowId } = req.params;
+  const userId = req.user.id;
+
+  try {
+    // First, verify the user owns this workflow to prevent data leakage
+    const ownerCheck = await pool.query('SELECT id FROM workflows WHERE id = $1 AND user_id = $2', [workflowId, userId]);
+    if (ownerCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Fetch the execution logs, most recent first
+    const result = await pool.query(
+      'SELECT * FROM executions WHERE workflow_id = $1 ORDER BY started_at DESC',
+      [workflowId]
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching execution history:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST to execute a workflow
 app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
   const { workflowId } = req.params;
   const userId = req.user.id;
@@ -123,7 +148,6 @@ app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
 
     while (currentNode) {
       const nodeLog = `[Step] Executing Node ID: ${currentNode.id}, Type: ${currentNode.type}`;
-      console.log(nodeLog);
       fullLog += `${nodeLog}\n`;
 
       switch (currentNode.type) {
@@ -132,11 +156,9 @@ app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
           const message = currentNode.data.message;
           if (webhookUrl && message) {
             try {
-              console.log(`[Integration] Sending message to Slack: "${message}"`);
               fullLog += `  - Sending message to Slack: "${message}"\n`;
               await axios.post(webhookUrl, { text: message });
             } catch (integrationError) {
-              console.error('[Integration] Slack API call failed:', integrationError.message);
               fullLog += `  - ERROR: Slack integration failed. ${integrationError.message}\n`;
             }
           } else {
@@ -144,7 +166,6 @@ app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
           }
           break;
         default:
-          console.log(`[Step] Standard node. No special action.`);
           fullLog += `  - Standard node. No special action.\n`;
           break;
       }
@@ -164,6 +185,7 @@ app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
 
 // --- START THE SERVER ---
 app.listen(port, () => {
