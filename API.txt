@@ -1,0 +1,45 @@
+http://localhost:5000/api/auth/register
+
+{
+    "username": "demouser",
+    "password": "password123"
+}
+
+http://localhost:5000/api/workflows
+
+{
+    "name": "API Created Workflow",
+    "definition": {
+        "nodes": [
+            {
+                "id": "dnd-node_0",
+                "type": "input",
+                "position": { "x": 250, "y": 100 },
+                "data": { "label": "API Start" }
+            },
+            {
+                "id": "dnd-node_1",
+                "type": "slack",
+                "position": { "x": 250, "y": 250 },
+                "data": {
+                    "label": "API Slack Message",
+                    "webhookUrl": "YOUR_SLACK_WEBHOOK_URL_HERE",
+                    "message": "This workflow was created entirely through the API!"
+                }
+            }
+        ],
+        "edges": [
+            {
+                "source": "dnd-node_0",
+                "sourceHandle": null,
+                "target": "dnd-node_1",
+                "targetHandle": null,
+                "id": "reactflow__edge-dnd-node_0-dnd-node_1"
+            }
+        ]
+    }
+}
+
+https://hooks.slack.com/services/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
+
+

@@ -4,7 +4,6 @@ import axios from 'axios';
 
 const API_URL = 'http://localhost:5000/api/auth';
 
-// onLoginSuccess is a function passed from App.jsx to notify it of a successful login
 const Auth = ({ onLoginSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
@@ -19,10 +18,8 @@ const Auth = ({ onLoginSuccess }) => {
     try {
       const response = await axios.post(url, { username, password });
       if (isLogin) {
-        // If login is successful, call the function from the parent component
         onLoginSuccess(response.data.token);
       } else {
-        // If registration is successful, switch to the login view
         alert('Registration successful! Please log in.');
         setIsLogin(true);
       }
@@ -32,37 +29,37 @@ const Auth = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div style={{ padding: '50px', maxWidth: '400px', margin: 'auto' }}>
-      <h1>{isLogin ? 'Login' : 'Register'}</h1>
-      <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '10px' }}>
-          <label>Username</label>
+    <div className="auth-container">
+      <form onSubmit={handleSubmit} className="auth-form">
+        <h1>{isLogin ? 'Login' : 'Register'}</h1>
+        <div className="form-group">
+          <label htmlFor="username">Username</label>
           <input
+            id="username"
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px' }}
           />
         </div>
-        <div style={{ marginBottom: '10px' }}>
-          <label>Password</label>
+        <div className="form-group">
+          <label htmlFor="password">Password</label>
           <input
+            id="password"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px' }}
           />
         </div>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" style={{ width: '100%', padding: '10px' }}>
+        {error && <p className="error-message">{error}</p>}
+        <button type="submit" className="submit-btn">
           {isLogin ? 'Login' : 'Register'}
         </button>
+        <button type="button" onClick={() => setIsLogin(!isLogin)} className="toggle-btn">
+          {isLogin ? 'Need an account? Register' : 'Have an account? Login'}
+        </button>
       </form>
-      <button onClick={() => setIsLogin(!isLogin)} style={{ background: 'none', border: 'none', color: 'blue', cursor: 'pointer', marginTop: '10px' }}>
-        {isLogin ? 'Need an account? Register' : 'Have an account? Login'}
-      </button>
     </div>
   );
 };
