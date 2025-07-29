@@ -2,7 +2,7 @@
 
 This is a fully-featured low-code automation platform built as a portfolio project. It allows users to visually design, execute, and monitor complex workflows, including integrations with external services like Slack.
 
-**[Link to Live Demo - You will get this after deployment]**
+**VIDEO**
 
 ![Screenshot of the application]([Link to a screenshot you will take])
 
@@ -37,7 +37,7 @@ This is a fully-featured low-code automation platform built as a portfolio proje
 
 1.  **Clone the repository:**
     ```bash
-    git clone [Your GitHub Repository URL]
+    git clone https://github.com/jeyapragash1/low-code-workflow-platform
     cd workflow-platform
     ```
 
