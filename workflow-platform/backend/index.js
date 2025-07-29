@@ -1,11 +1,15 @@
-// Import the libraries we installed
+// backend/index.js
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const axios = require('axios'); // Import axios for the backend
+const authenticateToken = require('./authMiddleware');
 
-// Initialize the express app
 const app = express();
 const port = 5000;
+const JWT_SECRET = 'your-super-secret-key-that-should-be-in-a-env-file';
 
 // --- MIDDLEWARE ---
 app.use(cors());
@@ -16,16 +20,61 @@ const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
   database: 'workflow_db',
-  password: 'root', // <-- VERY IMPORTANT: REPLACE WITH YOUR PASSWORD
+  password: 'root', // Remember to replace this!
   port: 5432,
 });
 
-// --- API ROUTES ---
+// =================================================================
+// === AUTHENTICATION ROUTES (Complete and Correct) ===
+// =================================================================
 
-// GET all workflows from the database
-app.get('/api/workflows', async (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM workflows ORDER BY created_at DESC');
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required.' });
+    }
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+    const newUser = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username, role',
+      [username, passwordHash]
+    );
+    res.status(201).json(newUser.rows[0]);
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(500).json({ error: 'Username may already be taken.' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const userRes = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    if (userRes.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid username or password.' });
+    }
+    const user = userRes.rows[0];
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) {
+      return res.status(400).json({ error: 'Invalid username or password.' });
+    }
+    const payload = { id: user.id, username: user.username, role: user.role };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+    res.json({ token });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// =================================================================
+// === WORKFLOW MANAGEMENT ROUTES (Complete and Correct) ===
+// =================================================================
+
+app.get('/api/workflows', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM workflows WHERE user_id = $1 ORDER BY created_at DESC', [req.user.id]);
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching workflows:', error);
@@ -33,15 +82,15 @@ app.get('/api/workflows', async (req, res) => {
   }
 });
 
-// POST a new workflow to save it in the database
-app.post('/api/workflows', async (req, res) => {
+app.post('/api/workflows', authenticateToken, async (req, res) => {
   try {
     const { name, definition } = req.body;
+    const userId = req.user.id;
     if (!name || !definition) {
       return res.status(400).json({ error: 'Name and definition are required.' });
     }
-    const sql = 'INSERT INTO workflows (name, definition) VALUES ($1, $2) RETURNING *';
-    const result = await pool.query(sql, [name, definition]);
+    const sql = 'INSERT INTO workflows (name, definition, user_id) VALUES ($1, $2, $3) RETURNING *';
+    const result = await pool.query(sql, [name, definition, userId]);
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error saving workflow:', error);
@@ -49,92 +98,74 @@ app.post('/api/workflows', async (req, res) => {
   }
 });
 
-
 // =================================================================
-// === NEW: INTELLIGENT WORKFLOW EXECUTION ENGINE ===
+// === UPGRADED WORKFLOW EXECUTION ENGINE (Complete and Correct) ===
 // =================================================================
-app.post('/api/execute/:workflowId', async (req, res) => {
+app.post('/api/execute/:workflowId', authenticateToken, async (req, res) => {
   const { workflowId } = req.params;
-  let executionId; // To track the execution log entry
+  const userId = req.user.id;
+  let executionId;
 
   try {
-    // 1. Fetch workflow definition
-    console.log(`--- [Engine] Starting execution for workflow ${workflowId} ---`);
-    const workflowRes = await pool.query('SELECT * FROM workflows WHERE id = $1', [workflowId]);
+    const workflowRes = await pool.query('SELECT * FROM workflows WHERE id = $1 AND user_id = $2', [workflowId, userId]);
     if (workflowRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Workflow not found.' });
+      return res.status(403).json({ error: 'Forbidden' });
     }
     const { nodes, edges } = workflowRes.rows[0].definition;
-
-    // 2. Create a new execution record
-    const logRes = await pool.query(
-      "INSERT INTO executions (workflow_id, status, log) VALUES ($1, 'running', $2) RETURNING id",
-      [workflowId, 'Execution started...']
-    );
+    const logRes = await pool.query("INSERT INTO executions (workflow_id, status, log) VALUES ($1, 'running', $2) RETURNING id", [workflowId, 'Execution started...']);
     executionId = logRes.rows[0].id;
 
-    // 3. Prepare for execution by organizing data
     const nodeMap = new Map(nodes.map(node => [node.id, node]));
     const edgeMap = new Map(edges.map(edge => [edge.source, edge.target]));
     let fullLog = 'Execution started...\n';
-
-    // 4. Find the starting node
     let currentNode = nodes.find(node => node.type === 'input');
-    if (!currentNode) {
-      throw new Error('Workflow has no "input" (start) node.');
-    }
+    if (!currentNode) throw new Error('Workflow has no "input" (start) node.');
 
-    // 5. Traverse the workflow using the edges
-    console.log(`[Engine] Found start node: ${currentNode.id}`);
     while (currentNode) {
-      // "Execute" the current node
-      const nodeLog = `[Step] Executing Node ID: ${currentNode.id}, Label: ${currentNode.data.label}`;
+      const nodeLog = `[Step] Executing Node ID: ${currentNode.id}, Type: ${currentNode.type}`;
       console.log(nodeLog);
       fullLog += `${nodeLog}\n`;
 
-      // Find the next node by looking for an edge starting from the current node
-      const nextNodeId = edgeMap.get(currentNode.id);
-      
-      if (nextNodeId) {
-        currentNode = nodeMap.get(nextNodeId);
-        if (!currentNode) throw new Error(`Workflow is broken. Edge points to non-existent node ID: ${nextNodeId}`);
-        console.log(`[Engine] Moving to next node: ${currentNode.id}`);
-      } else {
-        // If there's no outgoing edge, we've reached the end of this path
-        console.log('[Engine] Reached end of path.');
-        currentNode = null;
+      switch (currentNode.type) {
+        case 'slack':
+          const webhookUrl = currentNode.data.webhookUrl;
+          const message = currentNode.data.message;
+          if (webhookUrl && message) {
+            try {
+              console.log(`[Integration] Sending message to Slack: "${message}"`);
+              fullLog += `  - Sending message to Slack: "${message}"\n`;
+              await axios.post(webhookUrl, { text: message });
+            } catch (integrationError) {
+              console.error('[Integration] Slack API call failed:', integrationError.message);
+              fullLog += `  - ERROR: Slack integration failed. ${integrationError.message}\n`;
+            }
+          } else {
+            fullLog += `  - WARNING: Slack node is not configured correctly.\n`;
+          }
+          break;
+        default:
+          console.log(`[Step] Standard node. No special action.`);
+          fullLog += `  - Standard node. No special action.\n`;
+          break;
       }
+
+      const nextNodeId = edgeMap.get(currentNode.id);
+      currentNode = nextNodeId ? nodeMap.get(nextNodeId) : null;
     }
 
-    // 6. Finalize execution
     fullLog += 'Execution finished successfully.';
-    console.log(`--- [Engine] Finished execution for workflow ${workflowId} ---`);
-    await pool.query(
-      "UPDATE executions SET status = 'completed', ended_at = CURRENT_TIMESTAMP, log = $1 WHERE id = $2",
-      [fullLog, executionId]
-    );
-
+    await pool.query("UPDATE executions SET status = 'completed', ended_at = CURRENT_TIMESTAMP, log = $1 WHERE id = $2", [fullLog, executionId]);
     res.status(200).json({ message: 'Workflow executed successfully.', executionId });
-
   } catch (error) {
-    console.error(`[Engine] CRITICAL ERROR during execution for workflow ${workflowId}:`, error);
-    // If an error occurs, update the log with a 'failed' status
+    console.error(`[Engine] CRITICAL ERROR for workflow ${workflowId}:`, error);
     if (executionId) {
-      const errorLog = `Execution failed: ${error.message}`;
-      await pool.query(
-        "UPDATE executions SET status = 'failed', ended_at = CURRENT_TIMESTAMP, log = log || '\n' || $1 WHERE id = $2",
-        [errorLog, executionId]
-      );
+      await pool.query("UPDATE executions SET status = 'failed', ended_at = CURRENT_TIMESTAMP, log = log || '\nError: ' || $1 WHERE id = $2", [error.message, executionId]);
     }
-    res.status(500).json({ error: 'Internal Server Error during execution.' });
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
-// =================================================================
-// === END OF WORKFLOW EXECUTION ENGINE ===
-// =================================================================
-
 
 // --- START THE SERVER ---
 app.listen(port, () => {
-  console.log(`Backend server is running on http://localhost:${port}`);
+  console.log(`Backend server is running on http://localhost:5000`);
 });

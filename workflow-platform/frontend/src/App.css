@@ -21,8 +21,9 @@
 /* The workflow designer area */
 .designer-container {
   flex-grow: 1; /* The designer takes up most of the horizontal space */
-  display: flex;
-  flex-direction: column;
+  display: flex; /* THIS IS THE KEY */
+  flex-direction: column; /* Arrange children vertically */
+  height: 100%; /* Ensure it takes full available height */
 }
 
 .designer-header {
@@ -72,4 +73,24 @@
 
 .sidebar .node-item:active {
   cursor: grabbing;
+}
+
+/* frontend/src/App.css - add this to the end */
+
+/* Additional styling for the settings panel to differentiate it */
+.settings-panel {
+  background-color: #f0f8ff; /* A light blue to make it stand out */
+  border-left: 1px solid #ddd;
+  border-right: none; /* Remove right border if it's on the right side */
+}
+
+.settings-panel h2 {
+  color: #0056b3;
+}
+
+.settings-panel label {
+  display: block;
+  margin-top: 15px;
+  font-weight: bold;
+  font-size: 14px;
 }
