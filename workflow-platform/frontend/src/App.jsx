@@ -1,122 +1,155 @@
-// Import necessary tools from React and React Flow
-import { useState, useCallback } from 'react';
+// Import React tools, React Flow, and other components/libraries
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import ReactFlow, {
   Controls,
   Background,
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
+  ReactFlowProvider, // Provider is needed for hooks like useReactFlow
 } from 'reactflow';
-import axios from 'axios'; // For making API calls
+import axios from 'axios';
+import Sidebar from './Sidebar'; // Import our new Sidebar component
 
-// We need to import the React Flow CSS for it to work
+// Import our new CSS files
 import 'reactflow/dist/style.css';
+import './App.css';
 
-// Define the initial nodes for our workflow
-const initialNodes = [
-  {
-    id: '1',
-    type: 'input', // Special type for start nodes
-    data: { label: 'Start Workflow' },
-    position: { x: 250, y: 5 },
-  },
-];
+const API_URL = 'http://localhost:5000/api';
+let id = 0; // Simple ID counter for new nodes
+const getNextId = () => `dnd-node_${id++}`;
 
-function App() {
-  // State to hold our nodes and edges (the lines connecting nodes)
-  const [nodes, setNodes] = useState(initialNodes);
+// The main App component is now wrapped in ReactFlowProvider
+const App = () => {
+  return (
+    <ReactFlowProvider>
+      <WorkflowEditor />
+    </ReactFlowProvider>
+  );
+};
+
+const WorkflowEditor = () => {
+  const reactFlowWrapper = useRef(null);
+  const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
-  const [workflowName, setWorkflowName] = useState('My New Workflow');
+  const [reactFlowInstance, setReactFlowInstance] = useState(null);
 
-  // These functions are called by React Flow when you drag nodes or create edges
-  const onNodesChange = useCallback(
-    (changes) => setNodes((nds) => applyNodeChanges(changes, nds)),
-    [setNodes]
-  );
-  const onEdgesChange = useCallback(
-    (changes) => setEdges((eds) => applyEdgeChanges(changes, eds)),
-    [setEdges]
-  );
-  const onConnect = useCallback(
-    (params) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
-  );
+  // State for saved workflows and the current workflow name
+  const [workflows, setWorkflows] = useState([]);
+  const [workflowName, setWorkflowName] = useState('');
 
-  // --- Our custom functions ---
+  // --- React Flow handlers ---
+  const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
+  const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
+  const onConnect = useCallback((params) => setEdges((eds) => addEdge(params, eds)), []);
+  
+  // Handlers for drag-and-drop from sidebar
+  const onDragOver = useCallback((event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
 
-  // Function to add a new node to the canvas
-  const addNode = () => {
-    const newNode = {
-      id: `${nodes.length + 1}`, // Generate a simple unique ID
-      data: { label: `New Node ${nodes.length + 1}` },
-      position: {
-        x: Math.random() * 400, // Place it randomly
-        y: Math.random() * 400,
-      },
-    };
-    setNodes((currentNodes) => [...currentNodes, newNode]);
+  const onDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      const type = event.dataTransfer.getData('application/reactflow');
+      if (typeof type === 'undefined' || !type) {
+        return;
+      }
+      const position = reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      const newNode = {
+        id: getNextId(),
+        type,
+        position,
+        data: { label: `${type} node` },
+      };
+      setNodes((nds) => nds.concat(newNode));
+    },
+    [reactFlowInstance]
+  );
+  
+  // --- API Functions ---
+  const fetchWorkflows = () => {
+    axios.get(`${API_URL}/workflows`)
+      .then(response => setWorkflows(response.data))
+      .catch(error => console.error('Error fetching workflows:', error));
   };
 
-  // Function to save the workflow
+  useEffect(() => { fetchWorkflows(); }, []); // Fetch on initial load
+
   const saveWorkflow = async () => {
     if (!workflowName) {
       alert('Please enter a name for the workflow.');
       return;
     }
-
-    // Create the workflow definition object as designed in our plan
-    const workflowDefinition = {
-      nodes: nodes,
-      edges: edges,
-    };
-
+    const definition = { nodes, edges };
     try {
-      // Use axios to send a POST request to our backend
-      const response = await axios.post('http://localhost:5000/api/workflows', {
-        name: workflowName,
-        definition: workflowDefinition,
-      });
-      alert(`Workflow "${response.data.name}" saved successfully!`);
+      await axios.post(`${API_URL}/workflows`, { name: workflowName, definition });
+      alert(`Workflow "${workflowName}" saved successfully!`);
+      fetchWorkflows(); // Refresh list
     } catch (error) {
-      console.error('Failed to save workflow:', error);
-      alert('Error: Could not save the workflow. Check the console for details.');
+      alert('Failed to save workflow.');
+    }
+  };
+
+  const runWorkflow = async (workflowId, name) => {
+    try {
+      await axios.post(`${API_URL}/execute/${workflowId}`);
+      alert(`Execution started for "${name}"! Check backend console for logs.`);
+    } catch (error) {
+      alert('Failed to execute workflow.');
     }
   };
 
   return (
-    <div style={{ width: '100vw', height: '100vh' }}>
-      <h1>Low-Code Workflow Designer</h1>
-
-      {/* --- Control Panel --- */}
-      <div style={{ padding: '10px' }}>
-        <input
-          type="text"
-          value={workflowName}
-          onChange={(e) => setWorkflowName(e.target.value)}
-          placeholder="Enter Workflow Name"
-          style={{ marginRight: '10px' }}
-        />
-        <button onClick={addNode} style={{ marginRight: '10px' }}>
-          Add Node
-        </button>
-        <button onClick={saveWorkflow}>Save Workflow</button>
+    <div className="app-container">
+      <header className="header">
+        <h1>Low-Code Workflow Platform</h1>
+      </header>
+      
+      {/* List of saved workflows */}
+      <div style={{ padding: '10px 20px', borderBottom: '1px solid #eee' }}>
+        <h2>Saved Workflows</h2>
+        {workflows.map(wf => (
+          <div key={wf.id}>
+            {wf.name} <button onClick={() => runWorkflow(wf.id, wf.name)}>▶️ Run</button>
+          </div>
+        ))}
       </div>
 
-      {/* --- The Workflow Canvas --- */}
-      <div style={{ width: '100%', height: '80%' }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-        >
-          <Controls />
-          <Background />
-        </ReactFlow>
+      {/* Main content area with sidebar and designer */}
+      <div className="main-content">
+        <Sidebar />
+        <div className="designer-container" ref={reactFlowWrapper}>
+          <div className="designer-controls">
+            <input
+              type="text"
+              value={workflowName}
+              onChange={(e) => setWorkflowName(e.target.value)}
+              placeholder="Enter Workflow Name"
+            />
+            <button onClick={saveWorkflow} style={{ marginLeft: '10px' }}>Save Current Design</button>
+          </div>
+          <div className="designer-canvas">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onInit={setReactFlowInstance}
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+              fitView
+            >
+              <Controls />
+              <Background />
+            </ReactFlow>
+          </div>
+        </div>
       </div>
     </div>
   );
-}
+};
 
 export default App;
